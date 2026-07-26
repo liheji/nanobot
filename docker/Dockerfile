@@ -13,14 +13,14 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # Install dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates git bubblewrap openssh-client libmagic1 curl wget tmux gh && \
+    apt-get install -y --no-install-recommends ca-certificates git bubblewrap openssh-client libmagic1 curl wget tmux && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 24
 RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get update && \
     apt-get install -y --no-install-recommends nodejs && \
-    npm install -g pnpm yarn @steipete/summarize && \
+    npm install -g pnpm && \
     rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -71,6 +71,22 @@ RUN mkdir -p /root/.nanobot
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
 
+# Set apt-get source
+RUN test -f /etc/apt/sources.list.d/debian.sources && \
+    sed -i 's|deb.debian.org|mirrors.aliyun.com|g; s|security.debian.org/debian-security|mirrors.aliyun.com/debian-security|g' \
+    /etc/apt/sources.list.d/debian.sources || true
+
+# Set pip source
+ENV PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+
+# Set uv source
+ENV UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ENV UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
+
+# Set npm,pnpm,yarn source
+RUN npm config set registry https://registry.npmmirror.com && \
+    pnpm config set registry https://registry.npmmirror.com
+
 # Start as root so the entrypoint can chown the data dir (on Render, the
 # freshly-mounted root-owned persistent disk) before dropping to the non-root
 # nanobot user via setpriv. The entrypoint drops privileges on every root start
@@ -78,6 +94,7 @@ RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/ent
 # entrypoint.sh).
 USER root
 ENV HOME=/root
+ENV XDG_CONFIG_HOME="/root/.nanobot/.config"
 # Ensure crash output reaches Render logs (app output is otherwise swallowed on
 # non-graceful exit).
 ENV PYTHONUNBUFFERED=1 PYTHONFAULTHANDLER=1
