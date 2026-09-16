@@ -6,6 +6,8 @@ WORKDIR /app/webui
 RUN npm ci
 COPY webui/ ./
 COPY nanobot/channels/ /app/nanobot/channels/
+# The WebUI imports the shared transport-notification contract from
+COPY packages/client-events/ /app/packages/client-events/
 RUN sed -i 's/defaultLocale: SupportedLocale = "en"/defaultLocale: SupportedLocale = "zh-CN"/' src/i18n/config.ts \
     && mkdir -p /app/nanobot/web && npm run build
 
