@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { ToggleButton } from "@/components/settings/ToggleButton";
+import { ToggleButton } from "@/components/ui/toggle-button";
 import { SettingsGroup, SettingsRow } from "@/components/settings/shared/SettingsControls";
 import { Dialog, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Disclosure } from "@/components/ui/disclosure";
@@ -22,7 +22,7 @@ export function SettingsAdvancedOptions({ children }: { children: ReactNode }) {
 }
 
 export function SettingsFeature({
-  title, enabled, onChange, disabled, initialOpen = false, error, children,
+  title, enabled, onChange, disabled, initialOpen = false, error, children, onClose,
 }: {
   title: string;
   enabled: boolean;
@@ -31,6 +31,7 @@ export function SettingsFeature({
   initialOpen?: boolean;
   error?: string;
   children?: ReactNode;
+  onClose?: () => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(initialOpen && enabled);
@@ -43,7 +44,10 @@ export function SettingsFeature({
   }, [initialOpen, enabled]);
   return (
     <section ref={section} aria-label={title}>
-      <Dialog open={Boolean(children) && open} onOpenChange={setOpen}>
+      <Dialog open={Boolean(children) && open} onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) onClose?.();
+      }}>
       <SettingsGroup>
         <SettingsRow title={children ? (
           <DialogTrigger asChild>
