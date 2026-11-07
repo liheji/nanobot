@@ -5,9 +5,9 @@ COPY webui/package.json webui/package-lock.json ./webui/
 WORKDIR /app/webui
 RUN npm ci
 COPY webui/ ./
-COPY nanobot/channels/ /app/nanobot/channels/
 # The WebUI imports the shared transport-notification contract from
 COPY packages/client-events/ /app/packages/client-events/
+COPY nanobot/channels/ /app/nanobot/channels/
 RUN sed -i 's/defaultLocale: SupportedLocale = "en"/defaultLocale: SupportedLocale = "zh-CN"/' src/i18n/config.ts \
     && mkdir -p /app/nanobot/web && npm run build
 
@@ -15,7 +15,7 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
 # Install dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates git bubblewrap openssh-client libmagic1 curl wget tmux && \
+    apt-get install -y --no-install-recommends ca-certificates curl wget git bubblewrap openssh-client libmagic1 && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 24
@@ -28,31 +28,31 @@ RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
 # Set working directory
 WORKDIR /app
 
-# Keep the runtime environment writable by the non-root nanobot user. Enabled
-# channels may install their manifest-declared dependencies at startup.
+# Keep the virtualenv inside /app so it ships with the image. Enabled channels
+# may install their manifest-declared dependencies at startup.
 ENV VIRTUAL_ENV=/app/.venv
 ENV PATH="/app/.venv/bin:$PATH"
 RUN uv venv --seed "$VIRTUAL_ENV"
 
-# Install Python dependencies first (cached layer). Hatch reads the custom build
-# hook from hatch_build.py even for this metadata-only install.
-ARG NANOBOT_EXTRAS=
-COPY pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
-RUN mkdir -p nanobot && touch nanobot/__init__.py && \
-    if [ -n "$NANOBOT_EXTRAS" ]; then \
-        NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install \
-            --python "$VIRTUAL_ENV/bin/python" --no-cache ".[${NANOBOT_EXTRAS}]"; \
-    else \
-        NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install \
-            --python "$VIRTUAL_ENV/bin/python" --no-cache .; \
-    fi && \
-    rm -rf nanobot
+# Install Python dependencies first (cached layer). Resolving from
+# pyproject.toml only needs the dependency metadata, not a buildable package.
+ARG NANOBOT_EXTRAS=""
+COPY pyproject.toml ./
+RUN set -- && \
+    for extra in $(printf '%s' "$NANOBOT_EXTRAS" | tr ',' ' '); do \
+        set -- "$@" --extra "$extra"; \
+    done && \
+    uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache -r pyproject.toml "$@"
 
-# Copy the full source and install
+# Copy the full source and install. Dependencies are already installed, so
+# skip them. The hatch custom hook bundles docs/ into the wheel and requires
+# docs/README.md to exist.
+COPY README.md LICENSE THIRD_PARTY_NOTICES.md hatch_build.py ./
+COPY docs/ docs/
 COPY nanobot/ nanobot/
 COPY scripts/install_channel_dependencies.py scripts/
 COPY --from=webui-builder /app/nanobot/web/dist/ nanobot/web/dist/
-RUN NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache .
+RUN NANOBOT_SKIP_WEBUI_BUILD=1 uv pip install --python "$VIRTUAL_ENV/bin/python" --no-cache --no-deps .
 
 # Preinstall selected channel dependencies from their manifests. A comma-separated
 # list keeps the image configurable while preserving WhatsApp in the default image.
@@ -89,11 +89,9 @@ ENV UV_DEFAULT_INDEX=https://mirrors.aliyun.com/pypi/simple/
 RUN npm config set registry https://registry.npmmirror.com && \
     pnpm config set registry https://registry.npmmirror.com
 
-# Start as root so the entrypoint can chown the data dir (on Render, the
-# freshly-mounted root-owned persistent disk) before dropping to the non-root
-# nanobot user via setpriv. The entrypoint drops privileges on every root start
-# and fails closed if it cannot, so the agent never runs as root (see
-# entrypoint.sh).
+# Run as root (docker adaptation: no non-root user and no privilege dropping;
+# the entrypoint only prepares the data dir and the Render config when
+# RENDER=true before exec'ing nanobot).
 USER root
 ENV HOME=/root
 ENV XDG_CONFIG_HOME="/root/.nanobot/.config"

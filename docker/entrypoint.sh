@@ -28,4 +28,44 @@ if [ "$(id -u)" = "0" ]; then
     mkdir -p "$dir" 2>/dev/null || echo "[entrypoint] warning: mkdir $dir failed"
 fi
 
+# CLI Apps survive on the persistent volume (installed.json, skills), but the
+# installed binaries do not: pip installs land in /app/.venv and npm -g / uv
+# tool installs in image layers, all wiped when the container is recreated, so
+# every recorded app would show up as "missing" after an upgrade. Reinstall
+# them through nanobot's own installer: it skips apps whose entry point is
+# already on PATH and reinstalls the rest via their recorded strategy (pip,
+# npm, uv; bundled apps only need the image itself). Per-app failures are
+# logged and skipped — a failed restore must never block the gateway.
+if [ -f "$dir/cli-apps/installed.json" ]; then
+    python3 - <<'PYEOF'
+import sys
+import traceback
+
+try:
+    from nanobot.apps.cli.service import CliAppManager
+    from nanobot.config.paths import get_workspace_path
+
+    manager = CliAppManager(workspace=get_workspace_path())
+    names = manager.installed_names()
+except Exception:
+    print("[entrypoint] CLI apps restore skipped:", file=sys.stderr)
+    traceback.print_exc()
+    sys.exit(0)
+
+if not names:
+    print("[entrypoint] CLI apps restore: no apps recorded")
+    sys.exit(0)
+
+print(f"[entrypoint] CLI apps restore: {len(names)} recorded: {', '.join(names)}")
+for name in names:
+    try:
+        manager.install(name)
+        print(f"[entrypoint] CLI apps restore: {name} ok")
+    except Exception as exc:
+        print(f"[entrypoint] CLI apps restore: {name} failed: {exc}", file=sys.stderr)
+PYEOF
+else
+    echo "[entrypoint] no cli-apps/installed.json — no CLI apps to restore"
+fi
+
 exec nanobot "$@"

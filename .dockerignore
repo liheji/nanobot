@@ -9,6 +9,6 @@ nanobot/web/dist/
 .git
 .env
 .assets
-node_modules/
+**/node_modules
 bridge/dist/
 workspace/
